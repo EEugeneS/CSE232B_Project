@@ -1,5 +1,5 @@
 // Generated from XPath.g4 by ANTLR 4.13.2
-package main.antlr;
+package CSE232B_Project.main.antlr;
 import org.antlr.v4.runtime.Lexer;
 import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.Token;

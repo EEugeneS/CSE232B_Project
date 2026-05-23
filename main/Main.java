@@ -1,4 +1,4 @@
-package main;
+package CSE232B_Project.main;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -16,8 +16,7 @@ import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
-import main.antlr.XPathLexer;
-import main.antlr.XPathParser;
+
 import org.antlr.v4.runtime.BaseErrorListener;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
@@ -28,6 +27,9 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+
+import CSE232B_Project.main.antlr.XPathLexer;
+import CSE232B_Project.main.antlr.XPathParser;
 
 public class Main {
     public static void main(String[] args) throws Exception {
