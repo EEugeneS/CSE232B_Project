@@ -1,4 +1,4 @@
-package CSE232B_Project.main;
+package main;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -28,8 +28,8 @@ import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
-import CSE232B_Project.main.antlr.XPathLexer;
-import CSE232B_Project.main.antlr.XPathParser;
+import main.antlr.XPathLexer;
+import main.antlr.XPathParser;
 
 public class Main {
     public static void main(String[] args) throws Exception {

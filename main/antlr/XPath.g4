@@ -1,5 +1,9 @@
 grammar XPath;
 
+@header {
+package main.antlr;
+}
+
 ap
     : 'doc' '(' StringConstant ')' '/' rp EOF
     | 'doc' '(' StringConstant ')' '//' rp EOF

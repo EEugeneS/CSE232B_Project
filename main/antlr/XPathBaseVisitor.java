@@ -1,5 +1,5 @@
 // Generated from XPath.g4 by ANTLR 4.13.2
-package CSE232B_Project.main.antlr;
+package main.antlr;
 import org.antlr.v4.runtime.tree.AbstractParseTreeVisitor;
 
 /**

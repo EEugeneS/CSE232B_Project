@@ -9,7 +9,7 @@ The compiled `.class` files are already included in `bin`, so the project can be
 run directly from the project root:
 
 ```bash
-java -cp "lib/antlr-4.13.2-complete.jar:bin" CSE232B_Project.main.Main input.xml query.txt output.xml
+java -cp "lib/antlr-4.13.2-complete.jar:bin" main.Main input.xml query.txt output.xml
 ```
 
 Arguments:
