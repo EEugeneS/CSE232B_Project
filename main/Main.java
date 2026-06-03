@@ -8,8 +8,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.OutputKeys;
@@ -53,9 +56,9 @@ public class Main {
     private static Document fallbackInput;
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 3) {
+        if (args.length != 4) {
             throw new IllegalArgumentException(
-                "Usage: java -cp lib/* CSE232B_Project.main.Main <input xml> <input query> <output xml>");
+                "Usage: java -cp lib/* main.Main <input xml> <input query> <rewrite output> <result output>");
         }
         // Read the input XML once. It is used as the fallback for doc()/document()
         // calls whose filename does not resolve to a file on disk.
@@ -65,15 +68,18 @@ public class Main {
         DocumentBuilder builder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
         outputDoc = builder.newDocument();
 
-        // Parse the query.
         String query = readQuery(args[1]);
-        XQueryParser.XqMainContext root = parseQuery(query);
+        XQueryParser.XqMainContext original = parseQuery(query);
+        String rewrittenQuery = rewriteToJoinQuery(original);
+        Files.write(Paths.get(args[2]), rewrittenQuery.getBytes(StandardCharsets.UTF_8));
+
+        XQueryParser.XqMainContext root = parseQuery(rewrittenQuery);
 
         // Evaluate.
         List<Node> answer = evalXq(root.xq(), new Context());
 
         // Serialize.
-        writeResult(answer, args[2]);
+        writeResult(answer, args[3]);
     }
 
     // ====================================================================
@@ -184,11 +190,11 @@ public class Main {
      */
     private static List<Node> evalXqValue(XQueryParser.XqValueContext xv, Context ctx) {
         // Rule 22: Var lookup
-        if (xv.Var() != null && xv.xqValue() == null && xv.forClause() == null && xv.letClause() == null) {
+        if (xv.Var() != null && xv.xqValue().isEmpty() && xv.forClause() == null && xv.letClause() == null) {
             return ctx.lookup(xv.Var().getText());
         }
         // Rule 23: StringConstant -> text node
-        if (xv.StringConstant() != null && xv.xqValue() == null) {
+        if (xv.StringConstant() != null && xv.xqValue().isEmpty()) {
             String s = stripQuotes(xv.StringConstant().getText());
             return Collections.<Node>singletonList(outputDoc.createTextNode(s));
         }
@@ -199,6 +205,10 @@ public class Main {
 
         int n = xv.getChildCount();
         String first = xv.getChild(0).getText();
+
+        if ("join".equals(first)) {
+            return evalJoin(xv, ctx);
+        }
 
         // Rule 25: '(' xq ')'
         if (n == 3 && "(".equals(first)) {
@@ -218,14 +228,14 @@ public class Main {
         }
 
         // letClause xqValue
-        if (xv.letClause() != null && xv.xqValue() != null && xv.rp() == null) {
-            return evalLetExpr(xv.letClause(), xv.xqValue(), ctx);
+        if (xv.letClause() != null && !xv.xqValue().isEmpty() && xv.rp() == null) {
+            return evalLetExpr(xv.letClause(), xv.xqValue(0), ctx);
         }
 
         // Rules 27, 28: xqValue '/' rp  and  xqValue '//' rp
-        if (xv.xqValue() != null && xv.rp() != null) {
+        if (!xv.xqValue().isEmpty() && xv.rp() != null) {
             String sep = xv.getChild(1).getText();
-            List<Node> left = evalXqValue(xv.xqValue(), ctx);
+            List<Node> left = evalXqValue(xv.xqValue(0), ctx);
             if ("/".equals(sep)) {
                 // Rule 27
                 List<Node> out = new ArrayList<>();
@@ -241,6 +251,380 @@ public class Main {
         }
 
         throw new IllegalArgumentException("Unsupported xqValue: " + xv.getText());
+    }
+
+    private static List<Node> evalJoin(XQueryParser.XqValueContext xv, Context ctx) {
+        List<Node> left = evalXqValue(xv.xqValue(0), ctx);
+        List<Node> right = evalXqValue(xv.xqValue(1), ctx);
+        List<String> leftAttrs = attrNames(xv.attrList(0));
+        List<String> rightAttrs = attrNames(xv.attrList(1));
+
+        Map<List<String>, List<Element>> index = new HashMap<>();
+        for (Node node : left) {
+            if (node.getNodeType() != Node.ELEMENT_NODE) {
+                continue;
+            }
+            Element tuple = (Element) node;
+            List<String> key = joinKey(tuple, leftAttrs);
+            List<Element> bucket = index.get(key);
+            if (bucket == null) {
+                bucket = new ArrayList<>();
+                index.put(key, bucket);
+            }
+            bucket.add(tuple);
+        }
+
+        List<Node> result = new ArrayList<>();
+        for (Node node : right) {
+            if (node.getNodeType() != Node.ELEMENT_NODE) {
+                continue;
+            }
+            Element rightTuple = (Element) node;
+            List<Element> matches = index.get(joinKey(rightTuple, rightAttrs));
+            if (matches == null) {
+                continue;
+            }
+            for (Element leftTuple : matches) {
+                result.add(mergeTuples(leftTuple, rightTuple));
+            }
+        }
+        return result;
+    }
+
+    private static List<String> attrNames(XQueryParser.AttrListContext attrList) {
+        List<String> result = new ArrayList<>();
+        for (int i = 0; i < attrList.Name().size(); i++) {
+            result.add(attrList.Name(i).getText());
+        }
+        return result;
+    }
+
+    private static List<String> joinKey(Element tuple, List<String> attrs) {
+        List<String> key = new ArrayList<>();
+        for (String attr : attrs) {
+            key.add(tupleAttributeValue(tuple, attr));
+        }
+        return key;
+    }
+
+    private static String tupleAttributeValue(Element tuple, String attrName) {
+        Element attr = tupleAttribute(tuple, attrName);
+        if (attr == null) {
+            return "";
+        }
+        List<String> values = new ArrayList<>();
+        NodeList children = attr.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE || child.getNodeType() == Node.TEXT_NODE) {
+                values.add(child.getNodeName() + ":" + nodeStringValue(child));
+            }
+        }
+        return String.join("\u001F", values);
+    }
+
+    private static Element tupleAttribute(Element tuple, String attrName) {
+        NodeList children = tuple.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE && attrName.equals(child.getNodeName())) {
+                return (Element) child;
+            }
+        }
+        return null;
+    }
+
+    private static Element mergeTuples(Element left, Element right) {
+        Element tuple = outputDoc.createElement("tuple");
+        appendTupleAttributes(tuple, left);
+        appendTupleAttributes(tuple, right);
+        return tuple;
+    }
+
+    private static void appendTupleAttributes(Element target, Element source) {
+        NodeList children = source.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE) {
+                target.appendChild(outputDoc.importNode(child, true));
+            }
+        }
+    }
+
+    private static String rewriteToJoinQuery(XQueryParser.XqMainContext root) {
+        XQueryParser.XqContext xq = root.xq();
+        if (xq.xqValue().size() != 1) {
+            return xq.getText();
+        }
+
+        XQueryParser.XqValueContext flwr = xq.xqValue(0);
+        if (flwr.forClause() == null || flwr.whereClause() == null || flwr.returnClause() == null) {
+            return xq.getText();
+        }
+
+        List<ForBinding> bindings = collectForBindings(flwr.forClause());
+        List<RewriteGroup> groups = buildRewriteGroups(bindings);
+        List<RewriteCond> conditions = splitConditions(flwr.whereClause().cond());
+        assignConditions(groups, conditions);
+
+        if (groups.size() < 2 || !hasJoinCondition(groups)) {
+            return xq.getText();
+        }
+
+        String joinExpr = buildJoinExpression(groups);
+        String rewrittenReturn = rewriteReturn(flwr.returnClause().xq().getText(), bindings);
+        return "for $tuple in " + joinExpr + "\nreturn " + rewrittenReturn;
+    }
+
+    private static List<ForBinding> collectForBindings(XQueryParser.ForClauseContext forClause) {
+        List<String> vars = directChildVars(forClause);
+        List<XQueryParser.XqValueContext> exprs = forClause.xqValue();
+        List<ForBinding> bindings = new ArrayList<>();
+        for (int i = 0; i < vars.size(); i++) {
+            bindings.add(new ForBinding(vars.get(i), exprs.get(i).getText()));
+        }
+        return bindings;
+    }
+
+    private static List<RewriteGroup> buildRewriteGroups(List<ForBinding> bindings) {
+        List<RewriteGroup> groups = new ArrayList<>();
+        Map<String, RewriteGroup> varToGroup = new HashMap<>();
+        for (ForBinding binding : bindings) {
+            String dependency = leadingVar(binding.expr);
+            RewriteGroup group = dependency == null ? null : varToGroup.get(dependency);
+            if (group == null) {
+                group = new RewriteGroup();
+                groups.add(group);
+            }
+            group.bindings.add(binding);
+            varToGroup.put(binding.var, group);
+        }
+        return groups;
+    }
+
+    private static String leadingVar(String expr) {
+        if (!expr.startsWith("$")) {
+            return null;
+        }
+        int end = 1;
+        while (end < expr.length()) {
+            char c = expr.charAt(end);
+            if (Character.isLetterOrDigit(c) || c == '_' || c == '.' || c == '-') {
+                end++;
+            } else {
+                break;
+            }
+        }
+        return expr.substring(0, end);
+    }
+
+    private static List<RewriteCond> splitConditions(XQueryParser.CondContext cond) {
+        List<RewriteCond> result = new ArrayList<>();
+        collectConditions(cond, result);
+        return result;
+    }
+
+    private static void collectConditions(XQueryParser.CondContext cond, List<RewriteCond> result) {
+        if (cond.getChildCount() == 3 && "and".equals(cond.getChild(1).getText())) {
+            collectConditions(cond.cond(0), result);
+            collectConditions(cond.cond(1), result);
+            return;
+        }
+        if (cond.getChildCount() == 3 && "(".equals(cond.getChild(0).getText())) {
+            collectConditions(cond.cond(0), result);
+            return;
+        }
+        if (cond.getChildCount() == 3 && "eq".equals(cond.getChild(1).getText())) {
+            result.add(new RewriteCond(cond.xqValue(0).getText(), cond.xqValue(1).getText()));
+        }
+    }
+
+    private static void assignConditions(List<RewriteGroup> groups, List<RewriteCond> conditions) {
+        Map<String, RewriteGroup> varToGroup = new HashMap<>();
+        for (RewriteGroup group : groups) {
+            for (ForBinding binding : group.bindings) {
+                varToGroup.put(binding.var, group);
+            }
+        }
+
+        for (RewriteCond condition : conditions) {
+            String leftVar = condition.leftVar();
+            String rightVar = condition.rightVar();
+            RewriteGroup leftGroup = varToGroup.get(leftVar);
+            RewriteGroup rightGroup = varToGroup.get(rightVar);
+
+            if (leftGroup != null && rightGroup != null && leftGroup != rightGroup) {
+                leftGroup.joinConditions.add(condition);
+                rightGroup.joinConditions.add(condition);
+            } else if (leftGroup != null) {
+                leftGroup.localConditions.add(condition);
+            } else if (rightGroup != null) {
+                rightGroup.localConditions.add(condition);
+            }
+        }
+    }
+
+    private static boolean hasJoinCondition(List<RewriteGroup> groups) {
+        for (RewriteGroup group : groups) {
+            if (!group.joinConditions.isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String buildJoinExpression(List<RewriteGroup> groups) {
+        String current = buildTupleQuery(groups.get(0));
+        Set<RewriteGroup> joined = new LinkedHashSet<>();
+        joined.add(groups.get(0));
+
+        for (int i = 1; i < groups.size(); i++) {
+            RewriteGroup next = groups.get(i);
+            List<RewriteCond> joinConds = joinConditionsBetween(joined, next);
+            if (joinConds.isEmpty()) {
+                current = buildTupleQuery(next);
+                joined.clear();
+                joined.add(next);
+                continue;
+            }
+            List<String> leftAttrs = new ArrayList<>();
+            List<String> rightAttrs = new ArrayList<>();
+            for (RewriteCond cond : joinConds) {
+                if (containsVar(joined, cond.leftVar())) {
+                    leftAttrs.add(stripDollar(cond.leftVar()));
+                    rightAttrs.add(stripDollar(cond.rightVar()));
+                } else {
+                    leftAttrs.add(stripDollar(cond.rightVar()));
+                    rightAttrs.add(stripDollar(cond.leftVar()));
+                }
+            }
+            current = "join(\n" + current + ",\n" + buildTupleQuery(next) + ",\n"
+                + attrListText(leftAttrs) + ", " + attrListText(rightAttrs) + "\n)";
+            joined.add(next);
+        }
+        return current;
+    }
+
+    private static List<RewriteCond> joinConditionsBetween(Set<RewriteGroup> joined, RewriteGroup next) {
+        List<RewriteCond> result = new ArrayList<>();
+        for (RewriteCond cond : next.joinConditions) {
+            boolean leftJoined = containsVar(joined, cond.leftVar());
+            boolean rightJoined = containsVar(joined, cond.rightVar());
+            boolean leftNext = next.hasVar(cond.leftVar());
+            boolean rightNext = next.hasVar(cond.rightVar());
+            if ((leftJoined && rightNext) || (rightJoined && leftNext)) {
+                result.add(cond);
+            }
+        }
+        return result;
+    }
+
+    private static boolean containsVar(Set<RewriteGroup> groups, String var) {
+        for (RewriteGroup group : groups) {
+            if (group.hasVar(var)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String buildTupleQuery(RewriteGroup group) {
+        StringBuilder query = new StringBuilder();
+        query.append("for ");
+        for (int i = 0; i < group.bindings.size(); i++) {
+            ForBinding binding = group.bindings.get(i);
+            if (i > 0) {
+                query.append(", ");
+            }
+            query.append(binding.var).append(" in ").append(binding.expr);
+        }
+        if (!group.localConditions.isEmpty()) {
+            query.append("\nwhere ");
+            for (int i = 0; i < group.localConditions.size(); i++) {
+                if (i > 0) {
+                    query.append(" and ");
+                }
+                query.append(group.localConditions.get(i).toQuery());
+            }
+        }
+        query.append("\nreturn <tuple>{");
+        for (int i = 0; i < group.bindings.size(); i++) {
+            ForBinding binding = group.bindings.get(i);
+            if (i > 0) {
+                query.append(", ");
+            }
+            String name = stripDollar(binding.var);
+            query.append("<").append(name).append(">{").append(binding.var).append("}</").append(name).append(">");
+        }
+        query.append("}</tuple>");
+        return query.toString();
+    }
+
+    private static String attrListText(List<String> attrs) {
+        return "[" + String.join(", ", attrs) + "]";
+    }
+
+    private static String rewriteReturn(String returnText, List<ForBinding> bindings) {
+        List<ForBinding> sorted = new ArrayList<>(bindings);
+        Collections.sort(sorted, (a, b) -> b.var.length() - a.var.length());
+        String rewritten = returnText;
+        for (ForBinding binding : sorted) {
+            String var = Pattern.quote(binding.var);
+            String replacement = "\\$tuple/" + stripDollar(binding.var) + "/*";
+            rewritten = rewritten.replaceAll(var + "(?![A-Za-z0-9_.-])", replacement);
+        }
+        return rewritten;
+    }
+
+    private static String stripDollar(String var) {
+        return var.startsWith("$") ? var.substring(1) : var;
+    }
+
+    private static final class ForBinding {
+        final String var;
+        final String expr;
+
+        ForBinding(String var, String expr) {
+            this.var = var;
+            this.expr = expr;
+        }
+    }
+
+    private static final class RewriteGroup {
+        final List<ForBinding> bindings = new ArrayList<>();
+        final List<RewriteCond> localConditions = new ArrayList<>();
+        final List<RewriteCond> joinConditions = new ArrayList<>();
+
+        boolean hasVar(String var) {
+            for (ForBinding binding : bindings) {
+                if (binding.var.equals(var)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    private static final class RewriteCond {
+        final String left;
+        final String right;
+
+        RewriteCond(String left, String right) {
+            this.left = left;
+            this.right = right;
+        }
+
+        String leftVar() {
+            return left.startsWith("$") ? left : null;
+        }
+
+        String rightVar() {
+            return right.startsWith("$") ? right : null;
+        }
+
+        String toQuery() {
+            return left + " eq " + right;
+        }
     }
 
     /**
@@ -506,6 +890,7 @@ public class Main {
     // XPath (Milestone 1) - unchanged semantics, retargeted to XQuery types.
     // ====================================================================
 
+    // Rule 1, 2
     private static List<Node> evalAp(XQueryParser.ApContext ap) {
         // Tokens: ('doc'|'document') '(' StringConstant ')' ('/'|'//') rp
         String filename = stripQuotes(ap.StringConstant().getText());
@@ -612,26 +997,30 @@ public class Main {
     private static boolean evalFilter(XQueryParser.FContext filter, Node node) {
         int childCount = filter.getChildCount();
         String first = filter.getChild(0).getText();
-
+        // Rule 14
         if (childCount == 1) {
             return !evalRp(filter.rp(0), node).isEmpty();
         }
-
+        // Rule 21
         if (childCount == 2 && "not".equals(first)) {
             return !evalFilter(filter.f(0), node);
         }
 
         if (childCount == 3) {
             String op = filter.getChild(1).getText();
+            // Rule 18
             if ("(".equals(first)) {
                 return evalFilter(filter.f(0), node);
             }
+            // Rule 19
             if ("and".equals(op)) {
                 return evalFilter(filter.f(0), node) && evalFilter(filter.f(1), node);
             }
+            // Rule 20
             if ("or".equals(op)) {
                 return evalFilter(filter.f(0), node) || evalFilter(filter.f(1), node);
             }
+            // Rule 15
             if ("=".equals(op) || "eq".equals(op)) {
                 if (filter.StringConstant() != null) {
                     return compareWithString(filter.rp(0),
@@ -639,6 +1028,7 @@ public class Main {
                 }
                 return compareNodes(filter.rp(0), filter.rp(1), node, false);
             }
+            // Rule 16
             if ("==".equals(op) || "is".equals(op)) {
                 return compareNodes(filter.rp(0), filter.rp(1), node, true);
             }

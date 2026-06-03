@@ -1,5 +1,7 @@
-// Generated from main/antlr/XQuery.g4 by ANTLR 4.13.2
+// Generated from XQuery.g4 by ANTLR 4.13.2
+
 package main.antlr;
+
 import org.antlr.v4.runtime.tree.ParseTreeListener;
 
 /**
@@ -117,6 +119,16 @@ public interface XQueryListener extends ParseTreeListener {
 	 * @param ctx the parse tree
 	 */
 	void exitCond(XQueryParser.CondContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link XQueryParser#attrList}.
+	 * @param ctx the parse tree
+	 */
+	void enterAttrList(XQueryParser.AttrListContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link XQueryParser#attrList}.
+	 * @param ctx the parse tree
+	 */
+	void exitAttrList(XQueryParser.AttrListContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link XQueryParser#tagName}.
 	 * @param ctx the parse tree

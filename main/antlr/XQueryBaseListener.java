@@ -1,5 +1,7 @@
-// Generated from main/antlr/XQuery.g4 by ANTLR 4.13.2
+// Generated from XQuery.g4 by ANTLR 4.13.2
+
 package main.antlr;
+
 
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.tree.ErrorNode;
@@ -144,6 +146,18 @@ public class XQueryBaseListener implements XQueryListener {
 	 * <p>The default implementation does nothing.</p>
 	 */
 	@Override public void exitCond(XQueryParser.CondContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void enterAttrList(XQueryParser.AttrListContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitAttrList(XQueryParser.AttrListContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *

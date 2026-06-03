@@ -5,19 +5,20 @@ result to an output XML file.
 
 ## Run
 
-The compiled `.class` files are already included in `bin`, so the project can be
-run directly from the project root:
+Recompile after changing the Java source or ANTLR grammar, then run from the
+project root:
 
 ```bash
-java -cp "lib/antlr-4.13.2-complete.jar:bin" CSE232B_Project.main.Main input.xml query.txt output.xml
+java -cp "lib/antlr-4.13.2-complete.jar:bin" main.Main input.xml query.txt rewrite.xq output.xml
 ```
 
 Arguments:
 
 ```text
-input.xml    input XML file
-query.txt    input XPath/XQuery file
-output.xml   output XML file
+input.xml     input XML file
+query.txt     input XPath/XQuery file
+rewrite.xq    rewritten join query output file
+output.xml    XML result output file
 ```
 
 ## Recompile

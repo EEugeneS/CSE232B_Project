@@ -1,5 +1,7 @@
-// Generated from main/antlr/XQuery.g4 by ANTLR 4.13.2
+// Generated from XQuery.g4 by ANTLR 4.13.2
+
 package main.antlr;
+
 import org.antlr.v4.runtime.tree.ParseTreeVisitor;
 
 /**
@@ -76,6 +78,12 @@ public interface XQueryVisitor<T> extends ParseTreeVisitor<T> {
 	 * @return the visitor result
 	 */
 	T visitCond(XQueryParser.CondContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link XQueryParser#attrList}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitAttrList(XQueryParser.AttrListContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link XQueryParser#tagName}.
 	 * @param ctx the parse tree

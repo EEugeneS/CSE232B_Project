@@ -1,5 +1,9 @@
 grammar XQuery;
 
+@header {
+package main.antlr;
+}
+
 // Top-level entry: an XQuery expression terminated by EOF.
 xqMain
     : xq EOF
@@ -57,7 +61,8 @@ xq
 // binding values (after `in` or `:=`) so that the comma separating
 // bindings is not greedily absorbed.
 xqValue
-    : xqValue '/'  rp
+    : 'join' '(' xqValue ',' xqValue ',' attrList ',' attrList ')'
+    | xqValue '/'  rp
     | xqValue '//' rp
     | Var
     | StringConstant
@@ -95,6 +100,10 @@ cond
     | cond 'and' cond
     | cond 'or'  cond
     | 'not' cond
+    ;
+
+attrList
+    : '[' Name (',' Name)* ']'
     ;
 
 // =============================================================
