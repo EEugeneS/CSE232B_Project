@@ -434,7 +434,8 @@ public class Main {
             collectConditions(cond.cond(0), result);
             return;
         }
-        if (cond.getChildCount() == 3 && "eq".equals(cond.getChild(1).getText())) {
+        if (cond.getChildCount() == 3
+                && ("=".equals(cond.getChild(1).getText()) || "eq".equals(cond.getChild(1).getText()))) {
             result.add(new RewriteCond(cond.xqValue(0).getText(), cond.xqValue(1).getText()));
         }
     }
@@ -623,6 +624,9 @@ public class Main {
         }
 
         String toQuery() {
+            if (leftVar() == null && rightVar() != null) {
+                return right + " eq " + left;
+            }
             return left + " eq " + right;
         }
     }
