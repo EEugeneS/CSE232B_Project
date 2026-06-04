@@ -356,7 +356,7 @@ public class Main {
         if (xq.xqValue().size() != 1) {
             return xq.getText();
         }
-
+        // Must meet for, where, return format
         XQueryParser.XqValueContext flwr = xq.xqValue(0);
         if (flwr.forClause() == null || flwr.whereClause() == null || flwr.returnClause() == null) {
             return xq.getText();
@@ -372,6 +372,9 @@ public class Main {
         }
 
         String joinExpr = buildJoinExpression(groups);
+        if (joinExpr == null) {
+            return xq.getText();
+        }
         String rewrittenReturn = rewriteReturn(flwr.returnClause().xq().getText(), bindings);
         return "for $tuple in " + joinExpr + "\nreturn " + rewrittenReturn;
     }
@@ -390,6 +393,7 @@ public class Main {
         List<RewriteGroup> groups = new ArrayList<>();
         Map<String, RewriteGroup> varToGroup = new HashMap<>();
         for (ForBinding binding : bindings) {
+            // $xxx
             String dependency = leadingVar(binding.expr);
             RewriteGroup group = dependency == null ? null : varToGroup.get(dependency);
             if (group == null) {
@@ -478,15 +482,21 @@ public class Main {
         String current = buildTupleQuery(groups.get(0));
         Set<RewriteGroup> joined = new LinkedHashSet<>();
         joined.add(groups.get(0));
+        List<RewriteGroup> pending = new ArrayList<>(groups.subList(1, groups.size()));
 
-        for (int i = 1; i < groups.size(); i++) {
-            RewriteGroup next = groups.get(i);
-            List<RewriteCond> joinConds = joinConditionsBetween(joined, next);
-            if (joinConds.isEmpty()) {
-                current = buildTupleQuery(next);
-                joined.clear();
-                joined.add(next);
-                continue;
+        while (!pending.isEmpty()) {
+            RewriteGroup next = null;
+            List<RewriteCond> joinConds = Collections.emptyList();
+            for (RewriteGroup candidate : pending) {
+                List<RewriteCond> candidateConds = joinConditionsBetween(joined, candidate);
+                if (!candidateConds.isEmpty()) {
+                    next = candidate;
+                    joinConds = candidateConds;
+                    break;
+                }
+            }
+            if (next == null) {
+                return null;
             }
             List<String> leftAttrs = new ArrayList<>();
             List<String> rightAttrs = new ArrayList<>();
@@ -502,6 +512,7 @@ public class Main {
             current = "join(\n" + current + ",\n" + buildTupleQuery(next) + ",\n"
                 + attrListText(leftAttrs) + ", " + attrListText(rightAttrs) + "\n)";
             joined.add(next);
+            pending.remove(next);
         }
         return current;
     }
@@ -570,6 +581,7 @@ public class Main {
         Collections.sort(sorted, (a, b) -> b.var.length() - a.var.length());
         String rewritten = returnText;
         for (ForBinding binding : sorted) {
+            // regular expression
             String var = Pattern.quote(binding.var);
             String replacement = "\\$tuple/" + stripDollar(binding.var) + "/*";
             rewritten = rewritten.replaceAll(var + "(?![A-Za-z0-9_.-])", replacement);
